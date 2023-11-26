@@ -12,19 +12,33 @@
 .label sinBase = $3400
 .label spriteBase = $3800
 
+.label bounce_off = 128
+.label bounce_on = 129
+.label setColour  = 192
+.label oskSpriteOff = 224
+.label oskSpriteOn = 225
+.label extraTextOff = 226
+.label extraTextOn = 227
+.label rotateSpeed = 5
+
 * = $02 "zeropage" virtual
 bounceOn: .byte 0
-colourBarsOn: .byte 0
 sinPosition: .byte 0
 nextchar: .byte 0
 spriteColour: .byte 0
 colourBarPointer: .byte 0
+oskSpriteEnable: .byte 0
+extraTextEnable: .byte 0
+sprite0XPointer: .byte 0
+sprite0YPointer: .byte 0
+sprite0Frame: .byte 0
+sprite0Counter: .byte 0  
 
 * = $0801
 
 BasicUpstart2(Start)
 
-Start: {
+Start: 
 
         sei
 		//Stop CIA interrupts
@@ -35,25 +49,27 @@ Start: {
 		//Bank out BASIC + Kernal
 		lda #$35
 		sta $01
-
+        lda #$17
+        sta $d018
 
 		// Set Fore/back colors and clear screen to black 
         // we can also set up some inital variables along the way while we have
         // the correct number in a
 		lda #$00
         sta bounceOn
-        sta colourBarsOn
         sta sinPosition
         sta colourBarPointer
+        sta oskSpriteEnable
+        sta extraTextEnable
         sta $d020
         sta $d021
         lda #1              
         sta spriteColour    //start sprite colour as white (really background since sprites are transparent)
 
         lda #<scrolltext
-        sta PutCharInSprite7.scrolltextPointer
+        sta scrolltextPointer
         lda #>scrolltext
-        sta PutCharInSprite7.scrolltextPointer+1
+        sta scrolltextPointer+1
 		jsr ClearScreen
 
         ldx #7
@@ -68,10 +84,38 @@ Start: {
         dex
         bpl setSpriteBase
 
-        lda #$ff
-        sta $d01d       //set X double width
+        lda #spr_img0/64    //set up sprite0
+        sta $7f8
+        lda #7
+        sta sprite0Counter
         lda #0
-        sta $d017       // set Y to normal height
+        sta sprite0Frame
+        sta sprite0XPointer
+        tax
+        lda sinBase,x
+        clc
+        adc #32
+        sta $d000
+        lda #64
+        sta sprite0YPointer
+        tax
+        lda sinBase,x
+        sta $d001
+        lda #1
+        sta $d027   //set spr0 colour to white
+        sta $d01c   //spr0 is multicolor, rest are not
+        lda #RED
+        sta $d025   // multicolour 1
+        lda #GREEN   
+        sta $d026   //multicolour 2
+
+        
+
+
+        lda #$fF
+        sta $d01d       //set X double width 
+        lda #1
+        sta $d017       // set Y to normal height 1-7, 0 is dbl height
         ldx #2          //start at sprite 1
         lda #24         //sprite 1 at x = 24, rest follow 48 pixels apart. sprite 0 not used
     setSpriteXY:
@@ -89,18 +133,28 @@ Start: {
         lda #%11000000  // sprite 6 & 7 need bit 9 setting because they are on rigth side of screen (X > 255)
         sta $d010
 
-        lda #$FE        //sprites 1-7
+        lda #$fe        //sprites 1-7
         sta $d015       //turn on sprites 1 - 7
         jsr PutCharInSprite7    //put first char of our text into sprite 7
+
+        ldx #0
+        ldy #0
+    nextText:        
+        lda extraText,x
+        beq textDone
+        ora #$80
+        sta $0400+(23*40),y
+        inx
+        iny
+        jmp nextText
+    textDone:
 
 forever:
     eof:
         lda $d011
         bpl eof   // wait to below line 256
-    
-        // do all the hard bits while we have loads of time
+dec $d021
         jsr bounceIt        // do the bouncy thing if enabled
-
         jsr scrollSprites   // move everything left a bit - takes 18 lines!
 
 topbit:
@@ -108,20 +162,25 @@ topbit:
         bmi topbit
 
 
-        lda colourBarsOn        
-        beq justOneColour
+        lda oskSpriteEnable        
+        beq doSpriteColour
+        jsr sprite0Action
 
-    // do colour bars here
-        jmp forever
-
-    justOneColour:
+doSpriteColour:
         jsr SetSpriteColour
+
+CheckExtraText:
+        lda extraTextEnable
+        beq allDoneHere
+
+        jsr colourBars
+    // deal with extra text line here
+        
+    allDoneHere:
         jmp forever         //keep doing it again and again until user gets bored and closes vice64
-        rts                 //obligatory rts because you never know
-}
+       
 
 SetSpriteColour:
-{
         ldx sinPosition
         lda sinBase,x       // find which line our sprites start on
     waitForSpriteTop:   
@@ -138,17 +197,16 @@ SetSpriteColour:
         bcs waitForSpriteBottom 
         lda #0
         sta $d021           //turn background colour off
-}
+
 
 bounceIt:
-{
     lda bounceOn
     beq exit
     inc sinPosition
     ldx sinPosition
 
     lda sinBase,x
-    ldx #0 
+    ldx #2 
 bounce1:  
     sta $d001,x     //set sprite Y
     inx
@@ -157,10 +215,9 @@ bounce1:
     bne bounce1     // not yet ^
 exit:
     rts
-}
 
 PutCharInSprite7:
-{
+
     lda #<charBase    //start at char 0
     sta charData 
     lda #>charBase
@@ -189,13 +246,25 @@ testforspecial1:
     jmp getCharacter
 testforspecial2:
     cmp #224                //test for change colour
-    bcs colourbars
+    bcs oskSpriteTest
     and #$3f
     sta spriteColour
     jmp getCharacter
-colourbars:                 //test for OSK sprite or colourbar line
-    //and #1
-    //sta colourBarsOn
+oskSpriteTest:                 //test for OSK sprite or colourbar line
+    and #3
+    cmp #2
+    bcs extraTextTest
+    and #1
+    sta oskSpriteEnable
+    lda $d015          //and set sprite enable bit
+    and #$fe
+    ora oskSpriteEnable
+    sta $d015
+    jmp getCharacter
+
+extraTextTest:
+    and #1
+    sta extraTextEnable
     jmp getCharacter
 
 notspecial:
@@ -238,10 +307,10 @@ copy8:
     dex
     bpl copy8
     rts
-}
+
 
 scrollSprites:
-{
+
     //generate a whole bunch of rotate commands so we can shift bits left in the sprite data
     //can probably do this shorter but we have loads of RAM and this is quickest
     //we are using sprites 1-7 min double width 
@@ -261,15 +330,15 @@ scrollSprites:
         }
     }
     dec nextchar    //count the pixels
-    bpl exit        //not moved 8 yet so get out of here
+    bpl exitRotate        //not moved 8 yet so get out of here
     lda #7          //reset pixel counter
     sta nextchar
     jsr PutCharInSprite7    //put next character into sprite7
-exit:    
+exitRotate:    
     rts
-}
+
         
-ClearScreen: {
+ClearScreen: 
 		lda #$20
 		ldx #$00
 	loop:
@@ -285,18 +354,107 @@ ClearScreen: {
 		inx
 		bne loop
 		rts
-}
 
 
-.label bounce_off = 128
-.label bounce_on = 129
-.label setColour  = 192
-.label oskSpriteOff = 224
-.label oskSpriteOn = 225
-.label extraTextOff = 226
-.label extraTextOn = 227
+sprite0Action:
+    dec sprite0Counter
+    bne sprite0_2
+    lda #rotateSpeed
+    sta sprite0Counter
+sprite0_1:
+    lda sprite0Frame
+    clc
+    adc #1
+    and #7
+    sta sprite0Frame
+    clc
+    adc #$e8
+    sta $7f8
+sprite0_2:
+    dec sprite0XPointer
+    ldx sprite0XPointer
+    lda sinBase,x
+    clc
+    adc#32
+    sta $d000
+    dec sprite0YPointer
+    ldx sprite0YPointer
+    lda sinBase,x
+    sta $d001
+sprite0exit:   
+    rts
 
-scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/on, 192 + x = colour, 224/5 = Sprite 0 on /off 226/7 additonal line with colur bars on/off
+colourBars:
+    
+    //ldx #0
+    //ldy colourList,x
+    ldy #8
+    lda #235
+waitForLine:    
+    cmp $d012
+    bne waitForLine
+    sty $d021
+    //inx
+    //ldy colourList,x
+    ldy #7
+    lda #236
+waitForLine1:    
+    cmp $d012
+    bne waitForLine1
+    sty $d021
+    //inx
+    //ldy colourList,x
+    ldy #7
+    lda #237
+waitForLine2:    
+    cmp $d012
+    bne waitForLine2
+    sty $d021
+    ldy #8
+    lda #238
+waitForLine3:    
+    cmp $d012
+    bne waitForLine3
+    sty $d021    
+    ldy #6
+    lda #239
+waitForLine4:    
+    cmp $d012
+    bne waitForLine4
+    sty $d021    
+    ldy #14
+    lda #240
+waitForLine5:    
+    cmp $d012
+    bne waitForLine5
+    sty $d021 
+    ldy #14
+    lda #241
+waitForLine6:    
+    cmp $d012
+    bne waitForLine6
+    sty $d021 
+    ldy #6
+    lda #242
+waitForLine7:    
+    cmp $d012
+    bne waitForLine7
+    sty $d021 
+
+    ldy #0
+    lda #243
+waitForLine8:    
+    cmp $d012
+    bne waitForLine8
+    sty $d021 
+    
+rts
+
+
+scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/on, 192 + x = colour, 224/5 = Sprite 0 on /off 226/7 hidden line with colour bars on/off
+        .text " lets go!"
+        .byte extraTextOn
+        
         .text "OldSkoolCoder gave us homework. A text scroller he said... "
         .byte bounce_on
         .text " We thought it would be fun to add extra things."
@@ -304,24 +462,28 @@ scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/o
         .text" We can turn bounce on and off."
         .byte bounce_on
         .text " We can change colour. Lets try"
-        .byte setColour + 2
+        .byte setColour + RED
         .text " RED(Really? you call this RED), or maybe we want"
-        .byte setColour + 7
+        .byte setColour + YELLOW
         .text " YELLOW. I've been told some people like the colour"
-        .byte setColour + 14
+        .byte setColour + PURPLE
         .text " Purple? "
-        .text "Oh look, i found a spare sprite!"
+        .text "oh wait! I found a spare sprite."
         .byte oskSpriteOn
-        .text "The only thing left to do is"
+        .text " No Comments on my graphics skillz please!"
+        .byte setColour + GREEN 
+        .text "  The only thing left to do is"
         .byte extraTextOn
         .text " colour bars. I'm rubbish at colour sequences so you'll have to make do with this."
         .byte bounce_off
-        .text "                      "
-        .byte setColour + 1
+        .text "         BYE!!!                      "
+        .byte setColour + WHITE
+        .byte oskSpriteOff
         .byte 0 // text terminator
 
 extraText:
-    .text "OSK taught us how to do this."
+    .text " OSK PUT FANCY COLOURS ON HIS SCROLLER. "
+    .byte 255
 
 * = charBase "Charset"
 CharSet:
@@ -332,8 +494,69 @@ SinTable:
 .import binary "sintab.bin"
 
 colourList:
-        .byte 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,2,3,4,5,6
+    .byte 6, 14, 14, 6, 8, 7, 7, 8, 0
 
 * = spriteBase "Sprites"  // 8 sprites $3800-$39ff
 SpriteStart: 
 .fill 64*8,$ff // fill sprite data all pixels on
+
+
+// SPRITE IMAGE DATA : 8 images : total size is 512 ($200) bytes. E8
+
+spr_img0:
+
+.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+.byte $00,$00,$28,$14,$c3,$82,$41,$c3,$82,$40,$cc,$82,$40,$cc,$82,$40
+.byte $f0,$82,$14,$f0,$82,$01,$cc,$82,$01,$cc,$82,$41,$c3,$28,$14,$c3
+.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$81
+
+spr_img1:
+
+.byte $0a,$00,$00,$28,$80,$00,$28,$00,$00,$a0,$00,$00,$a0,$20,$00,$80
+.byte $a0,$00,$00,$94,$00,$02,$91,$00,$22,$10,$00,$0a,$00,$00,$01,$10
+.byte $40,$01,$00,$f0,$00,$00,$c0,$00,$07,$c0,$00,$57,$00,$00,$1f,$f3
+.byte $00,$0c,$f0,$00,$0c,$c0,$00,$00,$c0,$00,$00,$c0,$00,$00,$c0,$81
+
+spr_img2:
+
+.byte $02,$00,$00,$02,$00,$00,$02,$00,$00,$02,$00,$00,$00,$aa,$00,$00
+.byte $aa,$00,$00,$05,$00,$00,$05,$00,$01,$10,$00,$01,$10,$00,$01,$10
+.byte $00,$01,$10,$00,$00,$41,$00,$00,$41,$00,$03,$ff,$00,$03,$ff,$00
+.byte $00,$30,$00,$00,$30,$00,$00,$cc,$00,$00,$cc,$00,$03,$03,$00,$81
+
+spr_img3:
+
+.byte $00,$00,$28,$00,$08,$28,$00,$08,$0a,$00,$08,$0a,$00,$1a,$00,$00
+.byte $52,$00,$00,$02,$88,$00,$01,$80,$01,$01,$80,$0d,$51,$40,$0f,$40
+.byte $00,$03,$00,$00,$03,$c1,$00,$c3,$c4,$00,$ff,$f0,$00,$00,$30,$00
+.byte $03,$30,$00,$03,$00,$00,$00,$00,$00,$03,$00,$00,$03,$00,$00,$81
+
+spr_img4:
+
+.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$c3,$14,$28,$c3
+.byte $41,$82,$33,$40,$82,$33,$40,$82,$0f,$14,$82,$0f,$01,$82,$33,$01
+.byte $82,$33,$01,$82,$c3,$41,$82,$c3,$14,$28,$00,$00,$00,$00,$00,$00
+.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$81
+
+spr_img5:
+
+.byte $00,$00,$00,$03,$c0,$00,$00,$0c,$00,$3c,$3c,$00,$3c,$f4,$00,$00
+.byte $f4,$00,$00,$c4,$40,$03,$c0,$00,$03,$04,$40,$03,$40,$20,$00,$40
+.byte $28,$00,$41,$a0,$00,$05,$82,$00,$16,$80,$00,$06,$02,$00,$02,$02
+.byte $00,$00,$0a,$00,$02,$0a,$00,$00,$28,$00,$00,$a8,$00,$00,$20,$81
+
+spr_img6:
+
+.byte $00,$33,$00,$00,$33,$00,$00,$0c,$00,$00,$0c,$00,$00,$ff,$c0,$00
+.byte $ff,$c0,$00,$01,$40,$00,$01,$40,$00,$40,$00,$00,$40,$00,$00,$40
+.byte $00,$00,$40,$00,$00,$14,$40,$00,$14,$40,$00,$2a,$80,$00,$2a,$80
+.byte $00,$80,$00,$00,$80,$00,$00,$80,$00,$00,$80,$00,$00,$2a,$80,$81
+
+spr_img7:
+
+.byte $00,$00,$30,$00,$00,$00,$00,$00,$30,$00,$00,$30,$00,$0f,$0c,$00
+.byte $07,$3f,$00,$17,$cc,$00,$00,$c0,$00,$40,$f0,$00,$40,$70,$00,$40
+.byte $70,$02,$54,$40,$0a,$90,$00,$00,$80,$40,$20,$a0,$00,$20,$24,$00
+.byte $20,$28,$00,$28,$00,$00,$28,$00,$00,$0a,$20,$00,$0a,$00,$00,$81
+
+
