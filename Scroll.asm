@@ -2,6 +2,12 @@
 //  Sorcie's Homework
 //
 
+// to do
+// single line text lower down . with colour bars?
+// add sprite 0 . OSK logo?  circling 
+// forget colour bars on big scroller 
+
+
 .label charBase = $3000
 .label sinBase = $3400
 .label spriteBase = $3800
@@ -19,6 +25,18 @@ colourBarPointer: .byte 0
 BasicUpstart2(Start)
 
 Start: {
+
+        sei
+		//Stop CIA interrupts
+		lda #$7f
+		sta $dc0d
+		sta $dd0d
+
+		//Bank out BASIC + Kernal
+		lda #$35
+		sta $01
+
+
 		// Set Fore/back colors and clear screen to black 
         // we can also set up some inital variables along the way while we have
         // the correct number in a
@@ -27,8 +45,8 @@ Start: {
         sta colourBarsOn
         sta sinPosition
         sta colourBarPointer
-		sta $d020
-		sta $d021
+        sta $d020
+        sta $d021
         lda #1              
         sta spriteColour    //start sprite colour as white (really background since sprites are transparent)
 
@@ -54,7 +72,8 @@ Start: {
         sta $d01d       //set X double width
         lda #0
         sta $d017       // set Y to normal height
-        ldx #0
+        ldx #2          //start at sprite 1
+        lda #24         //sprite 1 at x = 24, rest follow 48 pixels apart. sprite 0 not used
     setSpriteXY:
         sta $d000,x     //set sprite X
         tay             // save a
@@ -70,86 +89,29 @@ Start: {
         lda #%11000000  // sprite 6 & 7 need bit 9 setting because they are on rigth side of screen (X > 255)
         sta $d010
 
-        lda #$FF
-        sta $d015       //turn all the sprites on
-
+        lda #$FE        //sprites 1-7
+        sta $d015       //turn on sprites 1 - 7
         jsr PutCharInSprite7    //put first char of our text into sprite 7
 
 forever:
-//inc $d020
-    topbit:
-		//wait for some point lower on the screen than we ever put sprites
-        //lda $d011   //wait until we are in top part of screen
-        //bpl topbit
-		
-        lda #80
-    wait4Line240:					
-		cmp $d012
-		bne wait4Line240 
-//inc $d020
+    eof:
+        lda $d011
+        bpl eof   // wait to below line 256
+    
         // do all the hard bits while we have loads of time
-inc $d020
         jsr bounceIt        // do the bouncy thing if enabled
 
         jsr scrollSprites   // move everything left a bit - takes 18 lines!
-//dec $d020
-        //inc $d020
-   // wait4Line256:         // wait until we are at top of screen
-    //    lda $d011
-    //    bmi wait4Line256
-        lda #28
-     wait4ScreenTop:
- //        lda $d011
- //         bmi wait4ScreenTop
-        cmp $d012
-        bne wait4ScreenTop
- 
-  dec $d020
+
+topbit:
+        lda $d011   //wait until we get back to top part of screen
+        bmi topbit
+
 
         lda colourBarsOn        
         beq justOneColour
 
     // do colour bars here
-
-        ldx sinPosition
-        lda sinBase,x           //get current 'top of sprites'
-        clc
-        adc #1                  //and point to next line down
-        sta lineCounter
-        ldy #8                // set number of bars (each is 2 lines)
-        ldx colourBarPointer    // and get current position in colourlist
-    waitForSpriteTop:
-        cmp $d012
-        bne waitForSpriteTop
-    waitAnotherLine:
-        cmp $d012
-        beq waitAnotherLine
-
-
-    nextBar:   
-        lda colourList,x
-        sta $d021               //set colour
-        sta $d027
-        inc lineCounter
-        inc lineCounter
-        lda lineCounter: #0
-    wait4nextline:
-        cmp $d012
-        bne wait4nextline
-        inx
-        dey
-        bne nextBar
-        lda #0
-        sta $d021
-        sta $d027
-
-        inc colourBarPointer
-        lda colourBarPointer
-        cmp #20
-        bne NotAtEnd
-        lda #0
-        sta colourBarPointer
-    NotAtEnd:
         jmp forever
 
     justOneColour:
@@ -231,15 +193,14 @@ testforspecial2:
     and #$3f
     sta spriteColour
     jmp getCharacter
-colourbars:                 //if we get here then its only option left - turn colour bars on/off
-    and #1
-    sta colourBarsOn
+colourbars:                 //test for OSK sprite or colourbar line
+    //and #1
+    //sta colourBarsOn
     jmp getCharacter
 
 notspecial:
     // work out where in char set it is
     // base + character * 8
-//    tay             //save for later
     and #%11100000  //get bits 5/6/7  to work out which page of font data we are on
     clc
     rol     
@@ -281,12 +242,17 @@ copy8:
 
 scrollSprites:
 {
-    // generate a whole bunch of rotate commands so we can shift bits left in the sprite data
+    //generate a whole bunch of rotate commands so we can shift bits left in the sprite data
     //can probably do this shorter but we have loads of RAM and this is quickest
+    //we are using sprites 1-7 min double width 
+    //screen visible is 320 pixels
+    //double width sprites are 48 pixels
+    //7 double width sprites is 336 pixels
+    //so we have 16 pixels over the right side to put data into thats not visible  
     sec
     .for (var j=4; j<12; j++)
     {
-        .for (var i=8; i>0; i--)
+        .for (var i=8; i>1; i--)
         {
             .for (var k=3; k>0; k--)
             {
@@ -321,33 +287,41 @@ ClearScreen: {
 		rts
 }
 
-scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/on, 192 + x = colour, 224/5 = colour bars on/off
-		// .text "co"
-        // .byte 192 + 6
-        // .text "lourbar I want to do some other stuff but its work in progress and i might not have "
-        // .byte 225
-        // .text "lots of text with colourbar effect if i did this correctly"
-        // .byte 129
-        // .text "and hopefully it still works when we add bounce                                   "
-        
+
+.label bounce_off = 128
+.label bounce_on = 129
+.label setColour  = 192
+.label oskSpriteOff = 224
+.label oskSpriteOn = 225
+.label extraTextOff = 226
+.label extraTextOn = 227
+
+scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/on, 192 + x = colour, 224/5 = Sprite 0 on /off 226/7 additonal line with colur bars on/off
         .text "OldSkoolCoder gave us homework. A text scroller he said... "
-        .byte 129
+        .byte bounce_on
         .text " We thought it would be fun to add extra things."
-        .byte 128
+        .byte bounce_off
         .text" We can turn bounce on and off."
-        .byte 129
+        .byte bounce_on
         .text " We can change colour. Lets try"
-        .byte 192+2
+        .byte setColour + 2
         .text " RED(Really? you call this RED), or maybe we want"
-        .byte 192+7
+        .byte setColour + 7
         .text " YELLOW. I've been told some people like the colour"
-        .byte 192+14
+        .byte setColour + 14
         .text " Purple? "
-        .text "Anyway, I want to do some other stuff but its work in progress and i might not have time so ..."
-        .byte 128
+        .text "Oh look, i found a spare sprite!"
+        .byte oskSpriteOn
+        .text "The only thing left to do is"
+        .byte extraTextOn
+        .text " colour bars. I'm rubbish at colour sequences so you'll have to make do with this."
+        .byte bounce_off
         .text "                      "
-        .byte 192+1
+        .byte setColour + 1
         .byte 0 // text terminator
+
+extraText:
+    .text "OSK taught us how to do this."
 
 * = charBase "Charset"
 CharSet:
@@ -358,7 +332,6 @@ SinTable:
 .import binary "sintab.bin"
 
 colourList:
-        .byte 11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12
         .byte 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,2,3,4,5,6
 
 * = spriteBase "Sprites"  // 8 sprites $3800-$39ff
