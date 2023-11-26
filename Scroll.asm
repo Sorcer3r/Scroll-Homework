@@ -81,26 +81,30 @@ forever:
 		//wait for some point lower on the screen than we ever put sprites
         //lda $d011   //wait until we are in top part of screen
         //bpl topbit
-inc $d020		
-        lda #200
+		
+        lda #80
     wait4Line240:					
 		cmp $d012
 		bne wait4Line240 
 //inc $d020
         // do all the hard bits while we have loads of time
 inc $d020
-        jsr scrollSprites   // move everything left a bit
         jsr bounceIt        // do the bouncy thing if enabled
-dec $d020
-dec $d020
+
+        jsr scrollSprites   // move everything left a bit - takes 18 lines!
+//dec $d020
         //inc $d020
-    wait4Line256:         // wait until we are at top of screen
-        lda $d011
-        bpl wait4Line256
-    wait4ScreenTop:
-        lda $d011
-        bmi wait4ScreenTop
-        //dec $d020
+   // wait4Line256:         // wait until we are at top of screen
+    //    lda $d011
+    //    bmi wait4Line256
+        lda #28
+     wait4ScreenTop:
+ //        lda $d011
+ //         bmi wait4ScreenTop
+        cmp $d012
+        bne wait4ScreenTop
+ 
+  dec $d020
 
         lda colourBarsOn        
         beq justOneColour
@@ -109,8 +113,8 @@ dec $d020
 
         ldx sinPosition
         lda sinBase,x           //get current 'top of sprites'
-        //clc
-        //adc #1                  //and point to next line down
+        clc
+        adc #1                  //and point to next line down
         sta lineCounter
         ldy #8                // set number of bars (each is 2 lines)
         ldx colourBarPointer    // and get current position in colourlist
