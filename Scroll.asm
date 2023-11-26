@@ -12,6 +12,7 @@ colourBarsOn: .byte 0
 sinPosition: .byte 0
 nextchar: .byte 0
 spriteColour: .byte 0
+colourBarPointer: .byte 0
 
 * = $0801
 
@@ -25,6 +26,7 @@ Start: {
         sta bounceOn
         sta colourBarsOn
         sta sinPosition
+        sta colourBarPointer
 		sta $d020
 		sta $d021
         lda #1              
@@ -74,48 +76,82 @@ Start: {
         jsr PutCharInSprite7    //put first char of our text into sprite 7
 
 forever:
+//inc $d020
+    topbit:
 		//wait for some point lower on the screen than we ever put sprites
-		lda #$e0
+        //lda $d011   //wait until we are in top part of screen
+        //bpl topbit
+inc $d020		
+        lda #200
     wait4Line240:					
 		cmp $d012
-		bcs wait4Line240 
-
+		bne wait4Line240 
 //inc $d020
+        // do all the hard bits while we have loads of time
+inc $d020
         jsr scrollSprites   // move everything left a bit
         jsr bounceIt        // do the bouncy thing if enabled
-//dec $d020
-
-    wait4ScreenTop:                // wait until we are at top of screen
+dec $d020
+dec $d020
+        //inc $d020
+    wait4Line256:         // wait until we are at top of screen
         lda $d011
-        bpl wait4ScreenTop
+        bpl wait4Line256
+    wait4ScreenTop:
+        lda $d011
+        bmi wait4ScreenTop
+        //dec $d020
 
-        lda colourBarsOn
-        bne justOneColour
+        lda colourBarsOn        
+        beq justOneColour
 
     // do colour bars here
 
+        ldx sinPosition
+        lda sinBase,x           //get current 'top of sprites'
+        //clc
+        //adc #1                  //and point to next line down
+        sta lineCounter
+        ldy #8                // set number of bars (each is 2 lines)
+        ldx colourBarPointer    // and get current position in colourlist
+    waitForSpriteTop:
+        cmp $d012
+        bne waitForSpriteTop
+    waitAnotherLine:
+        cmp $d012
+        beq waitAnotherLine
+
+
+    nextBar:   
+        lda colourList,x
+        sta $d021               //set colour
+        sta $d027
+        inc lineCounter
+        inc lineCounter
+        lda lineCounter: #0
+    wait4nextline:
+        cmp $d012
+        bne wait4nextline
+        inx
+        dey
+        bne nextBar
+        lda #0
+        sta $d021
+        sta $d027
+
+        inc colourBarPointer
+        lda colourBarPointer
+        cmp #20
+        bne NotAtEnd
+        lda #0
+        sta colourBarPointer
+    NotAtEnd:
+        jmp forever
 
     justOneColour:
-    //     ldx sinPosition
-    //     lda sinBase,x       // find which line our sprites start on
-    // waitForSpriteTop:   
-    //     cmp $d012           // and wait until we get there
-    //     bcs waitForSpriteTop
-    //     tax                 //remember which line we started on
-    //     lda spriteColour
-    //     sta $d021           //turn background colour on (sprites are transparent)
-    //     txa                 //get start line back
-    //     clc
-    //     adc #15             // not realy bottom of sprite but we only use 8 lines so turn colour back off before the bottom
-    // waitForSpriteBottom:
-    //     cmp $d012
-    //     bcs waitForSpriteBottom 
-    //     lda #0
-    //     sta $d021           //turn background colour off
-    jsr SetSpriteColour
-
-    jmp forever         //keep doing it again and again until user gets bored and closes vice64
-    rts                 //obligatory rts because you never know
+        jsr SetSpriteColour
+        jmp forever         //keep doing it again and again until user gets bored and closes vice64
+        rts                 //obligatory rts because you never know
 }
 
 SetSpriteColour:
@@ -282,7 +318,15 @@ ClearScreen: {
 }
 
 scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/on, 192 + x = colour, 224/5 = colour bars on/off
-		.text "OldSkoolCoder gave us homework. A text scroller he said... "
+		// .text "co"
+        // .byte 192 + 6
+        // .text "lourbar I want to do some other stuff but its work in progress and i might not have "
+        // .byte 225
+        // .text "lots of text with colourbar effect if i did this correctly"
+        // .byte 129
+        // .text "and hopefully it still works when we add bounce                                   "
+        
+        .text "OldSkoolCoder gave us homework. A text scroller he said... "
         .byte 129
         .text " We thought it would be fun to add extra things."
         .byte 128
@@ -308,6 +352,10 @@ CharSet:
 * = $3400 "SinTable"  // sin data starting at line 100  $3400-$34ff
 SinTable: 
 .import binary "sintab.bin"
+
+colourList:
+        .byte 11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12,11,11,12,12,15,15,12,12
+        .byte 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1,2,3,4,5,6
 
 * = spriteBase "Sprites"  // 8 sprites $3800-$39ff
 SpriteStart: 
