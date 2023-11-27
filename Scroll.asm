@@ -427,14 +427,6 @@ irq1:
 	pla
 	pha
 	pla
-	pha
-	pla
-	pha
-	pla	
-    pha
-	pla
-	pha
-	pla
 
 	lda $d016       	//scrolX
 	and #$07            // turn on 38col
@@ -444,12 +436,7 @@ irq1:
 		
 	lda #bottomScrollerStart
 	//sta currentRaster
-	sta $d012
-		
-	//	asl vic.vicirq			//clear int flag
-	
-//colour bars
-	
+	sta $d012	
 	ldx #0
 Colours1:
 	lda colourList,x
