@@ -21,6 +21,9 @@
 .label extraTextOn = 227
 .label rotateSpeed = 5
 
+.label bottomScrollerStart = 233
+.label colourListLength = colourListEnd - colourList
+
 * = $02 "zeropage" virtual
 bounceOn: .byte 0
 sinPosition: .byte 0
@@ -32,8 +35,10 @@ extraTextEnable: .byte 0
 sprite0XPointer: .byte 0
 sprite0YPointer: .byte 0
 sprite0Frame: .byte 0
-sprite0Counter: .byte 0  
-
+sprite0Counter: .byte 0 
+scrolXSave: .byte 0 
+bottomTextPos: .byte 0
+bottomTextXoffset: .byte 0
 * = $0801
 
 BasicUpstart2(Start)
@@ -52,6 +57,32 @@ Start:
         lda #$17
         sta $d018
 
+//set up irq
+
+        lda #<irq
+        sta $fffe
+        lda #>irq
+        sta $ffff
+
+        //lda #1
+        //sta $d019		//ack any pending INT
+        //sta $d01a		//enable raster int
+
+        //lda #bottomScrollerStart
+        //sta $d012                   //raster line to interrupt
+        
+        
+        lda $d016               //scrolX
+        sta scrolXSave
+
+        lda #<bottomText		//setup pointer to scroll text
+        sta bottomTextAdd
+        lda #>bottomText
+        sta bottomTextAdd+1
+
+
+
+
 		// Set Fore/back colors and clear screen to black 
         // we can also set up some inital variables along the way while we have
         // the correct number in a
@@ -61,6 +92,7 @@ Start:
         sta colourBarPointer
         sta oskSpriteEnable
         sta extraTextEnable
+        sta bottomTextPos
         sta $d020
         sta $d021
         lda #1              
@@ -73,6 +105,7 @@ Start:
 		jsr ClearScreen
 
         ldx #7
+        stx bottomTextXoffset
         stx nextchar    // while we have 7 may as well initialise the scroller
         ldy #SpriteStart/64 + 7
     setSpriteBase:
@@ -137,48 +170,42 @@ Start:
         sta $d015       //turn on sprites 1 - 7
         jsr PutCharInSprite7    //put first char of our text into sprite 7
 
-        ldx #0
-        ldy #0
+        ldx #120
+        lda #$a0
     nextText:        
-        lda extraText,x
-        beq textDone
-        ora #$80
-        sta $0400+(23*40),y
-        inx
-        iny
-        jmp nextText
-    textDone:
+        sta $0400+(22*40),x     //fill bottom 3 lines with inverse space
+        dex
+        bpl nextText
 
 forever:
-    eof:
-        lda $d011
-        bpl eof   // wait to below line 256
-dec $d021
-        jsr bounceIt        // do the bouncy thing if enabled
-        jsr scrollSprites   // move everything left a bit - takes 18 lines!
-
+eof:
+    lda $d011
+    bpl eof   // wait to below line 256
+    jsr bounceIt        // do the bouncy thing if enabled
+    jsr scrollSprites   // move everything left a bit - takes 18 lines!
 topbit:
-        lda $d011   //wait until we get back to top part of screen
-        bmi topbit
-
-
-        lda oskSpriteEnable        
-        beq doSpriteColour
-        jsr sprite0Action
-
+    lda $d011   //wait until we get back to top part of screen
+    bmi topbit
+    lda oskSpriteEnable        
+    beq doSpriteColour
+    jsr sprite0Action
 doSpriteColour:
-        jsr SetSpriteColour
-
+    jsr SetSpriteColour
 CheckExtraText:
-        lda extraTextEnable
-        beq allDoneHere
-
-        jsr colourBars
-    // deal with extra text line here
-        
-    allDoneHere:
-        jmp forever         //keep doing it again and again until user gets bored and closes vice64
-       
+    lda extraTextEnable
+    beq allDoneHere
+    lda #0
+    sta extraTextEnable //turn flag off - we dont need it anymore
+    lda #1
+    sta $d019		//ack any pending INT
+    sta $d01a		//enable raster int
+    lda #$1b
+    sta $d011
+    lda #bottomScrollerStart
+    sta $d012                   //raster line to interrupt
+    cli                  //turn interrupts on should start scroller
+allDoneHere:
+    jmp forever         //keep doing it again and again until user gets bored and closes vice64
 
 SetSpriteColour:
         ldx sinPosition
@@ -339,8 +366,8 @@ exitRotate:
 
         
 ClearScreen: 
-		lda #$A0
-		ldx #$00
+		lda #$20
+		ldx #0
 	loop:
 		sta $0400, x
 		sta $0500, x
@@ -384,77 +411,142 @@ sprite0_2:
 sprite0exit:   
     rts
 
-colourBars:
-    
-    //ldx #0
-    //ldy colourList,x
-    ldy #8
-    lda #234
-waitForLine:    
-    cmp $d012
-    bne waitForLine
-    sty $d021
-    //inx
-    //ldy colourList,x
-    ldy #7
-    lda #235
-waitForLine1:    
-    cmp $d012
-    bne waitForLine1
-    sty $d021
-    //inx
-    //ldy colourList,x
-    ldy #7
-    lda #236
-waitForLine2:    
-    cmp $d012
-    bne waitForLine2
-    sty $d021
-    ldy #8
-    lda #237
-waitForLine3:    
-    cmp $d012
-    bne waitForLine3
-    sty $d021    
-    ldy #6
-    lda #238
-waitForLine4:    
-    cmp $d012
-    bne waitForLine4
-    sty $d021    
-    ldy #14
-    lda #239
-waitForLine5:    
-    cmp $d012
-    bne waitForLine5
-    sty $d021 
-    ldy #14
-    lda #240
-waitForLine6:    
-    cmp $d012
-    bne waitForLine6
-    sty $d021 
-    ldy #6
-    lda #241
-waitForLine7:    
-    cmp $d012
-    bne waitForLine7
-    sty $d021 
 
-    ldy #0
-    lda #243
-waitForLine8:    
-    cmp $d012
-    bne waitForLine8
-    sty $d021 
-    
-rts
+irq:
+    pha
+    txa
+    pha
+    tya
+    pha
+
+    lda #bottomScrollerStart
+irq1:
+	cmp $d012
+	bne irq1
+	pha
+	pla
+	pha
+	pla
+	pha
+	pla
+	pha
+	pla	
+    pha
+	pla
+	pha
+	pla
+
+	lda $d016       	//scrolX
+	and #$07            // turn on 38col
+	ora bottomTextXoffset		// set scrollx offset
+	sta $d016
+		
+		
+	lda #bottomScrollerStart
+	//sta currentRaster
+	sta $d012
+		
+	//	asl vic.vicirq			//clear int flag
+	
+//colour bars
+	
+	ldx #0
+Colours1:
+	lda colourList,x
+	tay
+	lda $d012
+Colours2:
+	cmp $d012		//changed line yet?
+	beq Colours2
+	sty $d021       //background colour
+	inx
+	lda #bottomScrollerStart+9
+	cmp $d012
+	bne Colours1        //repeat accross the rasters of the text
+	
+colours3:
+	cmp $d012
+	beq  colours3
+	
+	lda #0
+	sta $d021
+
+    lda #bottomScrollerStart     //reset raster interrupt line
+	sta $d012
+
+	lda scrolXSave
+	sta $d016   		// restore scrolx (back out of 38CL mode
+
+	ldx bottomTextXoffset
+    dex
+	txa
+	and #%00000111
+	sta bottomTextXoffset
+
+	cmp #7
+	bne dontScroll				// if textscrollX != 7 we havent got next char yet
+
+	jsr ScrollBottomText
+dontScroll:
+    lda bottomTextXoffset
+    and #1
+    bne dontRotate
+    jsr rotateColours
+dontRotate:
+
+
+	asl $d019 //clear int req
+    pla
+    tay
+    pla
+    tax
+    pla
+    rti
+//end irq
+
+ScrollBottomText:
+
+	ldy #1           // 2nd char on line
+ShiftLeft:
+	lda $0400+(23*40),y
+	sta $0400+(23*40)-1,y
+	iny
+	cpy #40
+	bne ShiftLeft
+			
+getNextCharacter:	
+	lda bottomTextAdd: bottomText
+	bne notZero		    //not 0 terminator
+	lda #<bottomText		//setup opointer to scroll text
+	sta bottomTextAdd
+	lda #>bottomText
+	sta bottomTextAdd+1
+	jmp getNextCharacter
+notZero:
+	ora #$80
+	sta $0400+(23*40)+39
+	inc bottomTextAdd
+	bne exitScroller
+	inc bottomTextAdd+1
+exitScroller:
+    rts
+
+rotateColours:
+	lda colourList
+	tay         // save 1st colour
+	ldx #0
+rotate1:
+	lda colourList+1,x
+	sta colourList,x
+	inx
+	cpx #colourListLength
+	bne rotate1
+	tya
+	sta colourList,x
+    rts
 
 
 scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/on, 192 + x = colour, 224/5 = Sprite 0 on /off 226/7 hidden line with colour bars on/off
-        .text " lets go!"
-        .byte extraTextOn
-        
         .text "OldSkoolCoder gave us homework. A text scroller he said... "
         .byte bounce_on
         .text " We thought it would be fun to add extra things."
@@ -481,9 +573,11 @@ scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/o
         .byte oskSpriteOff
         .byte 0 // text terminator
 
-extraText:
-    .text " OSK PUT FANCY COLOURS ON HIS SCROLLER. "
-    .byte 255
+bottomText:
+    .text " OSK did fancy colours on his scroller so I suppose I should do the same. While we are here...  GREETZ to all the OSK"
+    .text " crew:  Garymeg, SP175, Docster, Mikroman, Waulok, 6502Kebab and any others who I can't think of at the moment. Blame old age :("
+    .text "                        "
+    .byte 0
 
 * = charBase "Charset"
 CharSet:
@@ -494,7 +588,8 @@ SinTable:
 .import binary "sintab.bin"
 
 colourList:
-    .byte 6, 14, 14, 6, 8, 7, 7, 8, 0
+    .byte 2,2,2,8,8,8,9,9,9,1,1,1,9,9,9,8,8,8,2,2,2,5,5,5,3,3,3,13,13,13,1,1,1,13,13,13,13,3,3,3,5,5,5,6,6,6,10,10,10,14,14,14,2,2,2,14,14,14,10,10,10,6,6,6
+colourListEnd:
 
 * = spriteBase "Sprites"  // 8 sprites $3800-$39ff
 SpriteStart: 
