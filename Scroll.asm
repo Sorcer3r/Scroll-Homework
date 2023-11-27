@@ -339,7 +339,7 @@ exitRotate:
 
         
 ClearScreen: 
-		lda #$20
+		lda #$A0
 		ldx #$00
 	loop:
 		sta $0400, x
@@ -389,7 +389,7 @@ colourBars:
     //ldx #0
     //ldy colourList,x
     ldy #8
-    lda #235
+    lda #234
 waitForLine:    
     cmp $d012
     bne waitForLine
@@ -397,7 +397,7 @@ waitForLine:
     //inx
     //ldy colourList,x
     ldy #7
-    lda #236
+    lda #235
 waitForLine1:    
     cmp $d012
     bne waitForLine1
@@ -405,37 +405,37 @@ waitForLine1:
     //inx
     //ldy colourList,x
     ldy #7
-    lda #237
+    lda #236
 waitForLine2:    
     cmp $d012
     bne waitForLine2
     sty $d021
     ldy #8
-    lda #238
+    lda #237
 waitForLine3:    
     cmp $d012
     bne waitForLine3
     sty $d021    
     ldy #6
-    lda #239
+    lda #238
 waitForLine4:    
     cmp $d012
     bne waitForLine4
     sty $d021    
     ldy #14
-    lda #240
+    lda #239
 waitForLine5:    
     cmp $d012
     bne waitForLine5
     sty $d021 
     ldy #14
-    lda #241
+    lda #240
 waitForLine6:    
     cmp $d012
     bne waitForLine6
     sty $d021 
     ldy #6
-    lda #242
+    lda #241
 waitForLine7:    
     cmp $d012
     bne waitForLine7
