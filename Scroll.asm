@@ -2,12 +2,6 @@
 //  Sorcie's Homework
 //
 
-// to do
-// single line text lower down . with colour bars?
-// add sprite 0 . OSK logo?  circling 
-// forget colour bars on big scroller 
-
-
 .label charBase = $3000
 .label sinBase = $3400
 .label spriteBase = $3800
@@ -64,24 +58,13 @@ Start:
         lda #>irq
         sta $ffff
 
-        //lda #1
-        //sta $d019		//ack any pending INT
-        //sta $d01a		//enable raster int
 
-        //lda #bottomScrollerStart
-        //sta $d012                   //raster line to interrupt
-        
-        
         lda $d016               //scrolX
         sta scrolXSave
-
         lda #<bottomText		//setup pointer to scroll text
         sta bottomTextAdd
         lda #>bottomText
         sta bottomTextAdd+1
-
-
-
 
 		// Set Fore/back colors and clear screen to black 
         // we can also set up some inital variables along the way while we have
@@ -97,13 +80,11 @@ Start:
         sta $d021
         lda #1              
         sta spriteColour    //start sprite colour as white (really background since sprites are transparent)
-
         lda #<scrolltext
         sta scrolltextPointer
         lda #>scrolltext
         sta scrolltextPointer+1
 		jsr ClearScreen
-
         ldx #7
         stx bottomTextXoffset
         stx nextchar    // while we have 7 may as well initialise the scroller
@@ -123,14 +104,15 @@ Start:
         sta sprite0Counter
         lda #0
         sta sprite0Frame
-        sta sprite0XPointer
+        sta sprite0XPointer     //  set initial X for sprite 0
         tax
         lda sinBase,x
-        clc
-        adc #32
+        sec
+        sbc #48                 //change range of X co=ordinates.
+        asl                     //explained in sprite0 movement routine
         sta $d000
         lda #64
-        sta sprite0YPointer
+        sta sprite0YPointer     // set initial Y for sprite 0 90degrees out of phase to X in the table
         tax
         lda sinBase,x
         sta $d001
@@ -141,10 +123,6 @@ Start:
         sta $d025   // multicolour 1
         lda #GREEN   
         sta $d026   //multicolour 2
-
-        
-
-
         lda #$fF
         sta $d01d       //set X double width 
         lda #1
@@ -165,16 +143,14 @@ Start:
         bne setSpriteXY // not yet
         lda #%11000000  // sprite 6 & 7 need bit 9 setting because they are on rigth side of screen (X > 255)
         sta $d010
-
         lda #$fe        //sprites 1-7
         sta $d015       //turn on sprites 1 - 7
         jsr PutCharInSprite7    //put first char of our text into sprite 7
-
-        ldx #120
+        ldx #80
         lda #$a0
     nextText:        
-        sta $0400+(22*40),x     //fill bottom 3 lines with inverse space
-        dex
+        sta $0400+(23*40),x     //fill bottom 2 lines with inverse space to hide any overrun of colour bars
+        dex                     // and stops us seeing a row of bars before text appears
         bpl nextText
 
 forever:
@@ -225,13 +201,11 @@ SetSpriteColour:
         lda #0
         sta $d021           //turn background colour off
 
-
 bounceIt:
     lda bounceOn
     beq exit
     inc sinPosition
     ldx sinPosition
-
     lda sinBase,x
     ldx #2 
 bounce1:  
@@ -321,7 +295,6 @@ notspecial:
     sta sprite7char 
     lda #>spriteBase + (64*7) + 9 + 2
     sta sprite7char + 1
-    
     ldx #7
     ldy #24
 copy8:
@@ -382,7 +355,6 @@ ClearScreen:
 		bne loop
 		rts
 
-
 sprite0Action:
     dec sprite0Counter
     bne sprite0_2
@@ -398,19 +370,25 @@ sprite0_1:
     adc #$e8
     sta $7f8
 sprite0_2:
-    dec sprite0XPointer
-    ldx sprite0XPointer
-    lda sinBase,x
-    clc
-    adc#32
-    sta $d000
     dec sprite0YPointer
     ldx sprite0YPointer
-    lda sinBase,x
-    sta $d001
+    lda sinBase,x               //get Y from sin table 
+    sta $d001                   //and set it for sprite 0 - OSK sprite
+    dec sprite0XPointer
+    lda sprite0XPointer
+    asl                 //double it to make X go thru sin table twice as fast
+    tax
+    lda sinBase,x       //get X from sin table
+    sec
+    sbc #48
+    asl                 //sub 48 and then double it to expand X range
+    sta $d000           //set lower 8 bits of X co-ordinate
+    lda #0
+    adc #$c0            //set bit8 of sprite 0 X (from carry) and keep bit8 for sprites 6 & 7 set
+    sta $d010
+
 sprite0exit:   
     rts
-
 
 irq:
     pha
@@ -419,24 +397,16 @@ irq:
     tya
     pha
 
-    lda #bottomScrollerStart
+    lda #bottomScrollerStart+1      //next line to start colour bars
 irq1:
 	cmp $d012
 	bne irq1
-	pha
-	pla
-	pha
-	pla
 
 	lda $d016       	//scrolX
 	and #$07            // turn on 38col
 	ora bottomTextXoffset		// set scrollx offset
 	sta $d016
-		
-		
-	lda #bottomScrollerStart
-	//sta currentRaster
-	sta $d012	
+
 	ldx #0
 Colours1:
 	lda colourList,x
@@ -447,41 +417,33 @@ Colours2:
 	beq Colours2
 	sty $d021       //background colour
 	inx
-	lda #bottomScrollerStart+9
+	lda #bottomScrollerStart+9      //Last raster line of the text +1
 	cmp $d012
 	bne Colours1        //repeat accross the rasters of the text
 	
 colours3:
 	cmp $d012
 	beq  colours3
-	
 	lda #0
 	sta $d021
-
     lda #bottomScrollerStart     //reset raster interrupt line
 	sta $d012
-
 	lda scrolXSave
 	sta $d016   		// restore scrolx (back out of 38CL mode
-
 	ldx bottomTextXoffset
     dex
 	txa
 	and #%00000111
 	sta bottomTextXoffset
-
 	cmp #7
 	bne dontScroll				// if textscrollX != 7 we havent got next char yet
-
 	jsr ScrollBottomText
 dontScroll:
     lda bottomTextXoffset
-    and #1
+    and #1                      //slow down the colour scroller
     bne dontRotate
     jsr rotateColours
 dontRotate:
-
-
 	asl $d019 //clear int req
     pla
     tay
@@ -492,7 +454,6 @@ dontRotate:
 //end irq
 
 ScrollBottomText:
-
 	ldy #1           // 2nd char on line
 ShiftLeft:
 	lda $0400+(23*40),y
@@ -536,9 +497,9 @@ rotate1:
 scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/on, 192 + x = colour, 224/5 = Sprite 0 on /off 226/7 hidden line with colour bars on/off
         .text "OldSkoolCoder gave us homework. A text scroller he said... "
         .byte bounce_on
-        .text " We thought it would be fun to add extra things."
+        .text " We thought it would be fun to add extra things"
         .byte bounce_off
-        .text" We can turn bounce on and off."
+        .text" that we can turn on and off."
         .byte bounce_on
         .text " We can change colour. Lets try"
         .byte setColour + RED
@@ -562,7 +523,7 @@ scrolltext:     // chars above 127 trigger effects on /off  128/9 = bounce off/o
 
 bottomText:
     .text " OSK did fancy colours on his scroller so I suppose I should do the same. While we are here...  GREETZ to all the OSK"
-    .text " crew:  Garymeg, SP175, Docster, Mikroman, Waulok, 6502Kebab and any others who I can't think of at the moment. Blame old age :("
+    .text " crew:  Garymeg, SP175, Docster, Mikroman, Waulok, 6502Kebab, StacBats and any others who I can't think of at the moment. I blame old age :("
     .text "                        "
     .byte 0
 
